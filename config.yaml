@@ -1,0 +1,34 @@
+interval: 10s
+interfaces:
+  - name: br0
+    address: 192.168.0.183/24
+    target: mark_wg1
+    ratio: 7
+    checks:
+    - name: check_gw_ssh
+      type: tcp
+      host: 192.168.0.2
+      port: 22
+      timeout: 500ms
+      retries: 2
+    - name: ping_gateway
+      type: icmp
+      host: 192.168.43.50
+      timeout: 5s
+      count: 5
+      interval: 100ms
+      maxrtt: 90
+      maxlosspcnt: 20
+    - name: check_haproxy
+      type: http
+      host: 192.168.0.183
+      secure: true
+      tlsverify: true
+      method: GET
+      request: /
+      responseCode: 200
+
+lbtable:
+  family: ip
+  name: mangle
+lbchain: load_balance
