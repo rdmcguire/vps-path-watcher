@@ -59,7 +59,7 @@ func main() {
 			wg.Wait()
 			os.Exit(0)
 		case <-ticker.C:
-			checkInterfaces()
+			go checkInterfaces()
 		}
 	}
 }
@@ -119,8 +119,9 @@ func checkInterfaces() {
 			"desiredStatus": desiredStatus,
 		}).Warn("Adjusting NFTables Load Balancing")
 		currentStatus = updateNFT(desiredStatus)
-		wg.Done()
 	}
+
+	wg.Done()
 }
 
 // Returns slice of all healthy interfaces
