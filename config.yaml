@@ -1,9 +1,16 @@
-interval: 10s
+interval: 15s
 interfaces:
+  - name: brkubes
+    address: 192.168.8.2/24
+    target: mark_kubes
+    mark: 0xa1
+    counter: true
+    ratio: 3
   - name: br0
     address: 192.168.0.183/24
     target: mark_wg1
     ratio: 7
+    mark: 0xa2
     checks:
     - name: check_gw_ssh
       type: tcp
@@ -14,18 +21,20 @@ interfaces:
     - name: ping_gateway
       type: icmp
       host: 192.168.43.50
-      timeout: 5s
+      timeout: 2s
       count: 5
       interval: 100ms
       maxrtt: 90
       maxlosspcnt: 20
     - name: check_haproxy
       type: http
-      host: 192.168.0.183
-      secure: true
-      tlsverify: true
+      host: libretechconsulting.com
+      tls: true
+      insecure: false
+      timeout: 5s
       method: GET
-      request: /
+      path: /
+      matchRegEx: "Libre"
       responseCode: 200
 
 lbtable:
