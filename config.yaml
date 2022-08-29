@@ -1,10 +1,12 @@
 interval: 15s
 interfaces:
-  - name: brkubes
-    address: 192.168.8.2/24
-    target: mark_kubes
-    mark: 0xa1
+  - name: wg0
+    address: 192.168.44.1/24
+    target: mark_wg0
+    mark: 0xa0
     counter: true
+    wireguard: true
+    wgpeer: somekey=
     ratio: 3
   - name: br0
     address: 192.168.0.183/24

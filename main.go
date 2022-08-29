@@ -20,6 +20,7 @@ var (
 func init() {
 	flag.StringVar(&configFile, "config", configFile, "Path to config yaml")
 	flag.StringVar(&logLevel, "logLevel", logLevel, "Default logging level")
+	flag.StringVar(&wgLastHandshake, "wgLastHandshake", wgLastHandshake, "Max last wg handshake before interface marked down")
 	flag.Parse()
 
 	// Load config from file
@@ -28,6 +29,9 @@ func init() {
 
 	// Prepare NFTables
 	initNFT()
+
+	// Prepare health status
+	resetHealth()
 }
 
 func main() {
@@ -54,6 +58,7 @@ func main() {
 			wg.Wait()
 			loadConfig()
 			initNFT()
+			resetHealth()
 		case <-die:
 			log.Warn("Asked to die, waiting on goroutines...")
 			wg.Wait()
@@ -79,9 +84,15 @@ func checkInterfaces() {
 			"checks": len(i.Checks),
 		}).Info("Running Interface Checks")
 
-		// Check Health
+		// Check Basic Interface Health
 		i.basicChecks()
-		i.healthChecks()
+
+		// Only perform additional checks if basic checks
+		// report a healthy interface
+		isHealthy, _ := i.status.healthy()
+		if isHealthy {
+			i.healthChecks()
+		}
 
 		// Check Result
 		log.Tracef("Check Results for %s: %+v", i.Name, i.status)
@@ -92,7 +103,7 @@ func checkInterfaces() {
 			log.WithFields(logrus.Fields{
 				"nif":     i.Name,
 				"reasons": reasons,
-			}).Error("Checks Complete, Interface Unhealthy")
+			}).Warn("Checks Complete, Interface Unhealthy")
 		}
 	}
 
@@ -102,13 +113,14 @@ func checkInterfaces() {
 	if healthyInterfaces == nil {
 		log.Error("No healthy interfaces, refusing to do anything")
 	} else if len(healthyInterfaces) < len(config.Interfaces) {
-		log.Warn("Interfaces degraded, routing to healthy only")
 		var ss []string
 		for _, i := range healthyInterfaces {
 			ss = append(ss, i.Name)
 		}
 		desiredStatus = strings.Join(ss, "|")
+		log.Warnf("Health degraded, healthy interfaces: %s", desiredStatus)
 	} else {
+		log.Infof("All interfaces up and healthy")
 		desiredStatus = "all"
 	}
 
@@ -121,6 +133,7 @@ func checkInterfaces() {
 		currentStatus = updateNFT(desiredStatus)
 	}
 
+	resetHealth()
 	wg.Done()
 }
 

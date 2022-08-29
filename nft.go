@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/expr"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -89,11 +91,11 @@ func updateNFT(ds string) string {
 	if ds == "all" {
 		log.Debugf("Setting NFTables LB Rule to all")
 		routeToAll()
-		state = "all"
 	} else {
 		log.Infof("Asked to route to interface(s) %s", ds)
 		routeToSubset(ds)
 	}
+	state = ds
 	return state
 }
 
@@ -191,24 +193,50 @@ func makeTarget(i *vpsInterface) {
 	commitAll()
 	// If a mark is declared, manage the rule here
 	if i.Mark != 0x0 {
+		// Prepare chain and rule
 		nft.FlushChain(chain)
 		commitAll()
-		var counter string
+
+		// Prepare nftables.expr rule
+		//// Build rule epressions
+		metaMark := []byte{i.Mark, 0, 0, 0}
+		log.Tracef("Byte Array: %+v", metaMark)
+		ruleExprs := []expr.Any{
+			&expr.Immediate{
+				Register: 1,
+				Data:     metaMark,
+			},
+			&expr.Meta{
+				Key:            unix.NFT_META_MARK,
+				SourceRegister: true,
+				Register:       1,
+			},
+		}
+		//// Optionally request counter
 		if i.Counter {
-			counter = " counter"
+			ruleExprs = append(ruleExprs, &expr.Counter{})
 		}
-		rule := fmt.Sprintf("add rule %s %s %s meta mark set %d%s return",
-			config.LBTable.Family, lbTable.Name, i.Target, i.Mark, counter)
-		log.Debugf("Loading interface mark rule: %s", rule)
+		ruleExprs = append(ruleExprs, &expr.Verdict{
+			Kind: expr.VerdictReturn,
+		})
+		//// Build rule
+		nftRule := &nftables.Rule{
+			Table: lbTable,
+			Chain: chain,
+			Exprs: ruleExprs,
+		}
+
 		// Load the rule
-		nftProg, err := exec.LookPath("nft")
+		nft.AddRule(nftRule)
+		commitAll()
+
+		// Trace debug our rule
+		rules, err := nft.GetRules(lbTable, chain)
 		if err != nil {
-			log.Fatalf("Failed to locate nft binary: %s", err)
-		}
-		nftCmd := exec.Command(nftProg, rule)
-		log.Tracef("Running %s", nftCmd.String())
-		if out, err := nftCmd.Output(); err != nil {
-			log.Fatalf("Failed to create interface mark rule: %s", out, string(err.(*exec.ExitError).Stderr))
+			log.Errorf("Failed to retrieve new rule from %s: %+v", chain.Name, err)
+		} else if len(rules) > 0 {
+			log.Trace("Created Rule")
+			logRule(rules[0])
 		}
 	}
 }

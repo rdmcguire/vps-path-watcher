@@ -1,0 +1,14 @@
+[Unit]
+Description=VPS Path Watcher
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/vps-path-watcher
+ExecStart=/home/redbeardmcg/work/vps-path-watcher -config /home/redbeardmcg/work/vpw_config.yaml -logLevel ${LOG_LEVEL}
+ExecReload= /bin/kill -HUP $MAINPID
+StandardOutput=journal
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

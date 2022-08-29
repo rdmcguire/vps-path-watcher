@@ -34,15 +34,17 @@ type (
 	// Configuration for each downstream interface,
 	// most likely wireguard interfaces
 	vpsInterface struct {
-		Name    string // Actual interface name
-		Address string // Interface address with subnet
-		Ratio   int8   // Scale of 1-10 (5 gets 50% of traffic)
-		Target  string // Name of chain to send packets
-		Mark    uint8  // Mark to add to packets. Does not create rule if left at 0x0
-		Counter bool   // Use counter if Mark defined (managed rule)
-		Checks  []*vpsHealthCheck
-		nif     *net.Interface
-		status  interfaceStatus
+		Name      string // Actual interface name
+		Address   string // Interface address with subnet
+		Wireguard bool   // Set to true if wireguard interface
+		WGPeer    string // Peer ID to check for liveness
+		Ratio     int8   // Scale of 1-10 (5 gets 50% of traffic)
+		Target    string // Name of chain to send packets
+		Mark      uint8  // Mark to add to packets. Does not create rule if left at 0x0
+		Counter   bool   // Use counter if Mark defined (managed rule)
+		Checks    []*vpsHealthCheck
+		nif       *net.Interface
+		status    *interfaceStatus
 	}
 
 	// Configure the health check
@@ -79,8 +81,10 @@ type (
 // Perform all configured interface health checks
 func (i *vpsInterface) healthChecks() {
 	if i.status.healthChecks == nil {
-		i.status.healthChecks = make(map[string]bool, len(i.Checks))
+		i.status.reset(len(i.Checks))
 	}
+
+	// Perform provisionend checks
 	for _, c := range i.Checks {
 		log.Tracef("Running health check %+v", c)
 		log.WithFields(logrus.Fields{
@@ -90,6 +94,11 @@ func (i *vpsInterface) healthChecks() {
 			"host":  c.Host,
 		}).Debug("Running Check")
 		i.healthCheck(c)
+	}
+
+	// Perform WG Checks if configured
+	if i.Wireguard {
+		checkWgHealth(i)
 	}
 }
 
@@ -360,6 +369,19 @@ func getInterface(name string) (bool, *net.Interface) {
 	return true, nif
 }
 
+// Resets stats for all interfaces
+func resetHealth() {
+	for _, i := range config.Interfaces {
+		i.status = new(interfaceStatus)
+	}
+}
+
+// Resets health status for given interface
+func (s *interfaceStatus) reset(numChecks int) {
+	s.healthChecks = make(map[string]bool, numChecks)
+}
+
+// Checks all interfaces for health
 func (s *interfaceStatus) healthy() (bool, []string) {
 	healthy := true
 	var reasons []string

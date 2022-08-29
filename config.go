@@ -16,11 +16,12 @@ const (
 )
 
 var (
-	configFile string = "config.yaml"
-	config     *vpsFirewall
-	logLevel   string = "info"
-	log        *logrus.Logger
-	interval   time.Duration
+	configFile      string = "config.yaml"
+	config          *vpsFirewall
+	logLevel        string = "info"
+	log             *logrus.Logger
+	wgLastHandshake string = "5m"
+	interval        time.Duration
 )
 
 func loadConfig() {
@@ -54,6 +55,18 @@ func loadConfig() {
 	interval, err = time.ParseDuration(config.Interval)
 	if err != nil {
 		log.Fatalf("Failed to parse execution interval %s: %+v", config.Interval, err)
+	}
+
+	// Prepare wireguard client if any wg interfaces
+	// are configured.
+	//
+	// Will force a check for last handshake if WGPeer given,
+	// max last handshake configurable via flag
+	for _, i := range config.Interfaces {
+		if i.Wireguard {
+			wgInit()
+			break
+		}
 	}
 
 	// Handle Durations
