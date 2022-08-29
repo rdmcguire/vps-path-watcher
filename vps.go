@@ -21,30 +21,36 @@ type (
 	// Configuration for VPS Path Watcher
 	// LBTable and LBChain determine where
 	// load balancer rules are placed
-	vpsFirewall struct {
+	vpsInstance struct {
 		Interval   string // Golang time duration e.g. 5s, 500ms, 1m30s
 		Interfaces []*vpsInterface
+		MinTimeOut string `yaml:"minimumTimeOut"` // Minimum amount of time unhealthy interface is pulled
 		LBTable    struct {
 			Family string // ip ip6 inet etc...
 			Name   string // Name of table
 		}
-		LBChain string
+		LBChain    string
+		minTimeOut time.Duration
 	}
 
 	// Configuration for each downstream interface,
 	// most likely wireguard interfaces
 	vpsInterface struct {
-		Name      string // Actual interface name
-		Address   string // Interface address with subnet
-		Wireguard bool   // Set to true if wireguard interface
-		WGPeer    string // Peer ID to check for liveness
-		Ratio     int8   // Scale of 1-10 (5 gets 50% of traffic)
-		Target    string // Name of chain to send packets
-		Mark      uint8  // Mark to add to packets. Does not create rule if left at 0x0
-		Counter   bool   // Use counter if Mark defined (managed rule)
-		Checks    []*vpsHealthCheck
-		nif       *net.Interface
-		status    *interfaceStatus
+		Name           string // Actual interface name
+		Address        string // Interface address with subnet
+		Wireguard      bool   // Set to true if wireguard interface
+		WGPeer         string // Peer ID to check for liveness
+		WGMaxHandshake string `yaml:"wgLastHandshake"` // Max time since last peer handshake, go time (e.g. 1m30s)
+		Ratio          int8   // Scale of 1-10 (5 gets 50% of traffic)
+		Target         string // Name of chain to send packets
+		Mark           uint8  // Mark to add to packets. Does not create rule if left at 0x0
+		Counter        bool   // Use counter if Mark defined (managed rule)
+		Checks         []*vpsHealthCheck
+		nif            *net.Interface
+		status         *interfaceStatus
+		lastStatus     *interfaceStatus
+		lastUnhealthy  time.Time
+		wgMaxHandshake time.Duration
 	}
 
 	// Configure the health check
@@ -75,6 +81,7 @@ type (
 		up           bool
 		addressed    bool
 		healthChecks map[string]bool
+		time         time.Time
 	}
 )
 
@@ -228,7 +235,7 @@ func (c *vpsHealthCheck) checkICMP() bool {
 		"check":    c.Name,
 		"host":     c.Host,
 		"count":    c.Count,
-		"interval": c.Insecure,
+		"interval": c.reqInterval,
 		"timeout":  c.Timeout,
 	}
 
@@ -266,6 +273,7 @@ func (c *vpsHealthCheck) checkICMP() bool {
 	if c.MaxLossPcnt != 0 {
 		if stats.PacketLoss > c.MaxLossPcnt {
 			log.WithFields(fields).WithField("MaxLossPercent", c.MaxLossPcnt).
+				WithField("ObservedLossPcnt", stats.PacketLoss).
 				Warn("Check Failed ICMP Packet Loss")
 			return false
 		}

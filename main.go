@@ -20,7 +20,6 @@ var (
 func init() {
 	flag.StringVar(&configFile, "config", configFile, "Path to config yaml")
 	flag.StringVar(&logLevel, "logLevel", logLevel, "Default logging level")
-	flag.StringVar(&wgLastHandshake, "wgLastHandshake", wgLastHandshake, "Max last wg handshake before interface marked down")
 	flag.Parse()
 
 	// Load config from file
@@ -78,6 +77,23 @@ func main() {
 func checkInterfaces() {
 	wg.Add(1)
 	for _, i := range config.Interfaces {
+		// Make sure interface is due for a check
+		if i.lastStatus != nil {
+			if time.Since(i.lastUnhealthy) < config.minTimeOut {
+				log.WithFields(logrus.Fields{
+					"nif":           i.Name,
+					"lastUnhealthy": i.lastUnhealthy,
+					"lastStatus":    i.lastStatus,
+					"timeElapsed":   time.Since(i.lastUnhealthy),
+				}).Debug("Skipping interface in time out")
+				log.Infof("Skipping interface %s in time out", i.Name)
+				continue
+			}
+		} else {
+			// First check, never unhealthy
+			i.lastUnhealthy = time.Now().Add(-8760 * time.Hour)
+		}
+
 		log.WithFields(logrus.Fields{
 			"nif":    i.Name,
 			"addr":   i.Address,
@@ -94,6 +110,10 @@ func checkInterfaces() {
 			i.healthChecks()
 		}
 
+		// Record last check
+		i.status.time = time.Now()
+		i.lastStatus = i.status // Not used now, but would be nice to show a from -> to debug msg
+
 		// Check Result
 		log.Tracef("Check Results for %s: %+v", i.Name, i.status)
 		healthy, reasons := i.status.healthy()
@@ -104,6 +124,7 @@ func checkInterfaces() {
 				"nif":     i.Name,
 				"reasons": reasons,
 			}).Warn("Checks Complete, Interface Unhealthy")
+			i.lastUnhealthy = i.status.time
 		}
 	}
 
@@ -129,7 +150,7 @@ func checkInterfaces() {
 		log.WithFields(logrus.Fields{
 			"currentStatus": currentStatus,
 			"desiredStatus": desiredStatus,
-		}).Warn("Adjusting NFTables Load Balancing")
+		}).Error("Adjusting NFTables Load Balancing")
 		currentStatus = updateNFT(desiredStatus)
 	}
 

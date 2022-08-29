@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"time"
 
@@ -9,19 +10,20 @@ import (
 )
 
 const (
-	defInterval      = "1m"
-	defTimeout       = "1s"
-	defRetryInterval = "250ms"
-	defICMPInterval  = "1s"
+	defInterval       = "1m"    // Default time between checks
+	defTimeout        = "1s"    // Default timeout for health checks
+	defRetryInterval  = "250ms" // Default wait between retries
+	defICMPInterval   = "1s"    // Default ICMP Request Interval
+	defWGMaxHandshake = "2m30s" // Max time since last Wireguard Peer handshake
+	defMinTimeOut     = "30s"   // Minimum amount of time between checks of unhealthy interface (penalty box)
 )
 
 var (
-	configFile      string = "config.yaml"
-	config          *vpsFirewall
-	logLevel        string = "info"
-	log             *logrus.Logger
-	wgLastHandshake string = "5m"
-	interval        time.Duration
+	configFile string = "config.yaml"
+	config     *vpsInstance
+	logLevel   string = "info"
+	log        *logrus.Logger
+	interval   time.Duration
 )
 
 func loadConfig() {
@@ -42,20 +44,17 @@ func loadConfig() {
 	}
 
 	// Unmarshal yaml
-	config = new(vpsFirewall)
+	config = new(vpsInstance)
 	err = yaml.Unmarshal(yamlConf, config)
 	if err != nil {
 		log.Fatalf("Failed to unmashal yaml config: %+v", err)
 	}
 
 	// Set Interval
-	if config.Interval == "" {
-		config.Interval = defInterval
-	}
-	interval, err = time.ParseDuration(config.Interval)
-	if err != nil {
-		log.Fatalf("Failed to parse execution interval %s: %+v", config.Interval, err)
-	}
+	interval = getDuration("config.Interval", config.Interval, defInterval)
+
+	// Set minimum time unhealthy interface is pulled from chain
+	config.minTimeOut = getDuration("Minimum Time Out", config.MinTimeOut, defMinTimeOut)
 
 	// Prepare wireguard client if any wg interfaces
 	// are configured.
@@ -71,44 +70,45 @@ func loadConfig() {
 
 	// Handle Durations
 	for _, i := range config.Interfaces {
+		// Max time since last wireguard peer handshake
+		if i.Wireguard && i.WGPeer != "" {
+			i.wgMaxHandshake = getDuration("Wireguard Max Handshake "+i.Name, i.WGMaxHandshake, defWGMaxHandshake)
+		}
+
 		for _, c := range i.Checks {
 			// Timeout
-			if c.Timeout == "" {
-				c.Timeout = defTimeout
-			}
-			c.tmout, err = time.ParseDuration(c.Timeout)
-			if err != nil {
-				log.WithFields(logrus.Fields{
-					"nif":     i.Name,
-					"check":   c.Name,
-					"timeout": c.Timeout,
-					"error":   err,
-				}).Error("Failed to parse check timeout, using default")
-				c.tmout, _ = time.ParseDuration(defTimeout)
-			}
+			c.tmout = getDuration(fmt.Sprintf("Check timeout %s %s", i.Name, c.Name), c.Timeout, defTimeout)
 
 			// Interval
-			if c.Interval == "" {
-				if c.Type == "icmp" {
-					c.Interval = defICMPInterval
-				} else {
-					c.Interval = defRetryInterval
-				}
+			var checkDefaultInterval string
+			if c.Type == "icmp" {
+				checkDefaultInterval = defICMPInterval
+			} else {
+				checkDefaultInterval = defRetryInterval
 			}
-			c.reqInterval, err = time.ParseDuration(c.Interval)
-			if err != nil {
-				log.WithFields(logrus.Fields{
-					"nif":      i.Name,
-					"check":    c.Name,
-					"interval": c.Interval,
-					"error":    err,
-				}).Error("Failed to parse check timeout, using default")
-				if c.Type == "icmp" {
-					c.reqInterval, _ = time.ParseDuration(defRetryInterval)
-				} else {
-					c.reqInterval, _ = time.ParseDuration(defICMPInterval)
-				}
-			}
+			c.reqInterval = getDuration(fmt.Sprintf("Check timeout %s %s", i.Name, c.Name), c.Interval, checkDefaultInterval)
 		}
 	}
+}
+
+// Given a wanted duration string and a fallback default,
+// return a time.Duration
+func getDuration(name string, d string, dd string) time.Duration {
+	var duration time.Duration
+	var err error
+
+	// Use default if setting is empty
+	if d == "" {
+		d = dd
+	}
+
+	// Try wanted duration string
+	duration, err = time.ParseDuration(d)
+	if err != nil {
+		// Return default otherwise -- trust the default
+		duration, _ = time.ParseDuration(dd)
+		log.Errorf("Failed to parse duration %s for %s: %v", d, name, err)
+	}
+
+	return duration
 }

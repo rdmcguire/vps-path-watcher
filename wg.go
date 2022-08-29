@@ -1,6 +1,9 @@
 package main
 
 import (
+	"time"
+
+	"github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -19,10 +22,7 @@ func wgInit() {
 	}
 
 	// Debug Devices
-	devices, err = client.Devices()
-	if err != nil {
-		log.Fatalf("Failed to retrieve wireguard devices: %+v", err)
-	}
+	getWgDevs()
 	printWgDevs(devices)
 
 	// Check if our declared wg devices exist
@@ -39,6 +39,8 @@ func wgInit() {
 // Health Checks for Wireguard Interface
 // Updates i.status.healthChecks[]
 func checkWgHealth(i *vpsInterface) {
+	// Refresh Devices
+	getWgDevs()
 	// Retrieve the device
 	device := getWgDev(i.Name)
 	if device == nil {
@@ -52,11 +54,34 @@ func checkWgHealth(i *vpsInterface) {
 	if i.WGPeer != "" {
 		peer := getWgPeer(device, i.WGPeer)
 		if peer == nil {
-			log.Warnf("Wireguard interface %s missing peer %s", i.Name, i.WGPeer)
+			log.Warnf("Check Failed Wireguard Peer %s %s", i.Name, i.WGPeer)
 			i.status.healthChecks["wg_has_peer"] = false
 		} else {
+			log.Debugf("Found peer %s for interface %s", peer.PublicKey.PublicKey(), i.Name)
 			i.status.healthChecks["wg_has_peer"] = true
+			// Now check last peer handshake
+			i.checkWgLastHandshake(peer)
 		}
+	}
+}
+
+// Checks the last peer handshake and compares to
+// vpsInterface.WGMaxHandshake
+func (i *vpsInterface) checkWgLastHandshake(peer *wgtypes.Peer) {
+	timeSince := time.Since(peer.LastHandshakeTime)
+	if timeSince > i.wgMaxHandshake {
+		log.WithFields(logrus.Fields{
+			"nif":            i.Name,
+			"peer":           peer.PublicKey.String(),
+			"lastHandshake":  peer.LastHandshakeTime,
+			"timeSince":      timeSince,
+			"maxTimeAllowed": i.wgMaxHandshake,
+		}).Warn("Check Failed Wireguard Peer Last Handshake")
+		i.status.healthChecks["wg_last_handshake"] = false
+	} else {
+		log.Debugf("Wireguard peer %s last handshake OK: %s",
+			peer.PublicKey.String(), timeSince)
+		i.status.healthChecks["wg_last_handshake"] = true
 	}
 }
 
@@ -84,6 +109,15 @@ func getWgDev(name string) *wgtypes.Device {
 		}
 	}
 	return device
+}
+
+// Fetches / refreshes wireguard devices
+func getWgDevs() {
+	var err error
+	devices, err = client.Devices()
+	if err != nil {
+		log.Fatalf("Failed to retrieve wireguard devices: %+v", err)
+	}
 }
 
 // Trace prints wireguard devices
