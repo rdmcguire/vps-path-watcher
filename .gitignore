@@ -1,5 +1,6 @@
 # Binaries for programs and plugins
 vps-path-watcher
+config.yaml
 *.exe
 *.exe~
 *.dll

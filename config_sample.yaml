@@ -1,0 +1,53 @@
+lbtable:
+  family: ip
+  name: mangle
+lbchain: load_balance
+interval: 10s
+minTimeOut: 1m
+interfaces:
+  - name: wg0
+    wireguard: true
+    wgpeer: somepeerkey=
+    address: 192.168.42.50/24
+    target: mark_wg0
+    ratio: 3
+    mark: 0xa0
+    counter: true
+    checks:
+    - name: check_gw_ssh
+      type: tcp
+      host: 192.168.42.1
+      port: 22
+      timeout: 500ms
+      retries: 2
+    - name: ping_gateway
+      type: icmp
+      host: 192.168.42.1
+      timeout: 2s
+      count: 5
+      interval: 100ms
+      maxrtt: 100
+      maxlosspcnt: 20
+  - name: wg1
+    wireguard: true
+    wgpeer: someotherpeerkey=
+    address: 192.168.43.50/24
+    target: mark_wg1
+    ratio: 7
+    mark: 0xa1
+    counter: true
+    checks:
+    - name: check_gw_ssh
+      type: tcp
+      host: 192.168.43.1
+      port: 22
+      timeout: 500ms
+      retries: 2
+    - name: ping_gateway
+      type: icmp
+      host: 192.168.43.1
+      timeout: 2s
+      count: 5
+      interval: 100ms
+      maxrtt: 100
+      maxlosspcnt: 20
